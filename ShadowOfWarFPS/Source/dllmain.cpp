@@ -1,58 +1,91 @@
 #include "pch.h"
 
 
-
 namespace sow
 {
 	struct Vec3f {
 		float x, y, z;
+
+		Vec3f operator+(const Vec3f& other) {
+			return { x + other.x, y + other.y, z + other.z };
+		}
+
+		Vec3f operator*(float scale) {
+			return { x * scale, y * scale, z * scale };
+		}
 	};
 
 	struct Quaternion {
-		float x, y, z, w;
+		float w, x, y, z;
 
-		Vec3f to_direction() {
-			Vec3f tmp{};
-			tmp.x = 2 * (x * z - w * y);
-			tmp.y = 2 * (y * z + w * x);
-			tmp.z = 1 - 2 * (x * x + y * y);
-			return tmp;
+		Quaternion operator*(const Quaternion& q) const {
+			return {
+				w * q.w - x * q.x - y * q.y - z * q.z,
+				w * q.x + x * q.w + y * q.z - z * q.y,
+				w * q.y - x * q.z + y * q.w + z * q.x,
+				w * q.z + x * q.y - y * q.x + z * q.w
+			};
 		}
 
-		Vec3f to_euler() {
-			Vec3f euler;
-
-			float sinr_cosp = 2 * (w * x + y * z);
-			float cosr_cosp = 1 - 2 * (x * x + y * y);
-			euler.x = std::atan2(sinr_cosp, cosr_cosp);
-
-			float sinp = 2 * (w * y - z * x);
-			if (std::abs(sinp) >= 1)
-				euler.y = std::copysign(3.14159 / 2, sinp);
-			else
-				euler.y = std::asin(sinp);
-
-			float siny_cosp = 2 * (w * z + x * y);
-			float cosy_cosp = 1 - 2 * (y * y + z * z);
-			euler.z = std::atan2(siny_cosp, cosy_cosp);
-
-			return euler;
+		void normalize() {
+			float mag = std::sqrt(w * w + x * x + y * y + z * z);
+			if (mag > 0.0f) {
+				w /= mag;
+				x /= mag;
+				y /= mag;
+				z /= mag;
+			}
 		}
 
-		static Quaternion from_euler(const Vec3f& euler) {
-			Quaternion q;
-			float cy = std::cos(euler.z * 0.5f);
-			float sy = std::sin(euler.z * 0.5f);
-			float cp = std::cos(euler.y * 0.5f);
-			float sp = std::sin(euler.y * 0.5f);
-			float cr = std::cos(euler.x * 0.5f);
-			float sr = std::sin(euler.x * 0.5f);
-			q.w = cr * cp * cy + sr * sp * sy;
-			q.x = sr * cp * cy - cr * sp * sy;
-			q.y = cr * sp * cy + sr * cp * sy;
-			q.z = cr * cp * sy - sr * sp * cy;
+		Quaternion conjugate() const {
+			return { w, -x, -y, -z };
+		}
 
-			return q;
+		float signedAngleOnAxis(const Quaternion& other, float ax, float ay, float az) const {
+			Quaternion qDiff = conjugate() * other;
+			qDiff.normalize();
+
+			float magAxis = std::sqrt(ax * ax + ay * ay + az * az);
+			if (magAxis > 0.0f) {
+				ax /= magAxis;
+				ay /= magAxis;
+				az /= magAxis;
+			}
+
+			float angle = 2.0f * std::atan2(qDiff.x * ax + qDiff.y * ay + qDiff.z * az, qDiff.w);
+			if (angle > 3.14159) angle -= 2.0f * 3.14159;
+			if (angle < -3.14159) angle += 2.0f * 3.14159;
+
+			return angle;
+		}
+
+		Vec3f rotateVector(const Vec3f& v) const {
+			Quaternion vectorQuat = { 0, v.x, v.y, v.z };
+			Quaternion result = (*this) * vectorQuat * conjugate();
+			return { result.x, result.y, result.z };
+		}
+
+		static Quaternion fromAxisAngle(float ax, float ay, float az, float angle) {
+			float halfAngle = angle * 0.5f;
+			float sinHalfAngle = std::sin(halfAngle);
+			float cosHalfAngle = std::cos(halfAngle);
+			return {
+				cosHalfAngle,
+				ax * sinHalfAngle,
+				ay * sinHalfAngle,
+				az * sinHalfAngle
+			};
+		}
+
+		Quaternion rotate(float ax, float ay, float az, float angle) const {
+			Quaternion rotation = Quaternion::fromAxisAngle(ax, ay, az, angle);
+			Quaternion conjugate = { rotation.w, -rotation.x, -rotation.y, -rotation.z };
+			Quaternion result = rotation * (*this) * conjugate;
+			return result;
+		}
+
+		void setRotation(float ax, float ay, float az, float angle) {
+			*this = Quaternion::fromAxisAngle(ax, ay, az, angle);
 		}
 	};
 
@@ -187,6 +220,9 @@ SET_TRANSFORM dFunction = (SET_TRANSFORM)0x14014554C;
 
 sow::GameClient* game_client = nullptr;
 
+uintptr_t PLAYER_BASE_ADDRESS = (uintptr_t)GetModuleHandle(NULL) + 0x26FFB70;
+std::vector<unsigned int> PLAYER_OFFSETS = { 0x28, 0x468, 0x20, 0x8, 0x38, 0x90, 0x0 };
+
 uintptr_t PLAYER_HEAD_BASE_ADDRESS = (uintptr_t)GetModuleHandle(NULL) + 0x02797808;
 std::vector<unsigned int> PLAYER_HEAD_OFFSETS = { 0x20, 0x8, 0x28, 0xA0, 0xA0, 0x80, 0x110, 0xF8, 0x44 + 0xc0};
 
@@ -224,8 +260,10 @@ DWORD WINAPI MainThread(LPVOID param) {
 	uintptr_t game_client_address = sigscan("48 8B 0D ? ? ? ? E8 ? ? ? ? C7 47");
 
 
-	sow::EntityTransform* player_transform = nullptr;
+	sow::EntityTransform* player_head_transform = nullptr, *player_transform = nullptr;
+	float* fov = nullptr;
 	bool valid;
+	float rot = 0; 
 	for (;;) {
 		if (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) {
 			enabled = !enabled;
@@ -251,20 +289,42 @@ DWORD WINAPI MainThread(LPVOID param) {
 			continue;
 
 		if (!isBadReadPtr((void*)PLAYER_HEAD_BASE_ADDRESS)) {
-			player_transform = (sow::EntityTransform*)calcAddS(*(uintptr_t*)(PLAYER_HEAD_BASE_ADDRESS), PLAYER_HEAD_OFFSETS, valid);
+			player_head_transform = (sow::EntityTransform*)calcAddS(*(uintptr_t*)(PLAYER_HEAD_BASE_ADDRESS), PLAYER_HEAD_OFFSETS, valid);
 		}
+		if (!valid) player_head_transform = nullptr;
 
-		if (valid) {
+		if (!isBadReadPtr((void*)PLAYER_BASE_ADDRESS)) {
+			player_transform = (sow::EntityTransform*)calcAddS(*(uintptr_t*)(PLAYER_BASE_ADDRESS), PLAYER_OFFSETS, valid);
+		}
+		if (!valid) player_transform = nullptr;
+
+		if (!isBadReadPtr((void*)FOV_BASE_ADDRESS)) {
+			fov = (float*)calcAddS(*(uintptr_t*)(FOV_BASE_ADDRESS), FOV_OFFSETS, valid);
+		}
+		if (!valid) fov = nullptr;
+
+		if (player_head_transform != nullptr && player_transform != nullptr) {
 			auto* ct = game_client->camera_owner->gameplay_camera->transform;
-			ct->position.x = player_transform->position.x;
-			ct->position.y = player_transform->position.y;
-			ct->position.z = player_transform->position.z;
+			sow::Vec3f forward = { 0, 0, 1 };
 
-			sow::Vec3f player_rotation = player_transform->rotation.to_euler();
-			sow::Vec3f camera_rotation = ct->rotation.to_euler();
-			camera_rotation.z = player_rotation.z;
-			camera_rotation.y = player_rotation.y;
-			ct->rotation.from_euler(camera_rotation);
+			// head rotation is not correctly set... this is probably not the actual "head" but rather a pivot inside of the player...
+			sow::Vec3f direction = player_transform->rotation.rotateVector(forward);
+
+			ct->position = player_head_transform->position + (direction * 20.f);
+			ct->position.y += 10.f;
+			
+			
+			while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 > 65) {
+				player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, -0.001);
+			}
+			while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 < -65) {
+				player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, 0.001);
+			}
+
+		}
+		
+		if (fov != nullptr) {
+			*fov = 1.8f;
 		}
 	}
 
