@@ -1,5 +1,6 @@
 #include "pch.h"
 
+#define input(x) ((GetAsyncKeyState(x) & 0x8000) != 0)
 
 namespace sow
 {
@@ -185,7 +186,7 @@ uintptr_t sigscan(const char* pattern)
 	return NULL;
 }
 
-inline bool isBadReadPtr(void* p)
+bool isBadReadPtr(void* p)
 {
 	MEMORY_BASIC_INFORMATION mbi = { 0 };
 	if (::VirtualQuery(p, &mbi, sizeof(mbi)))
@@ -198,7 +199,7 @@ inline bool isBadReadPtr(void* p)
 	return true;
 }
 
-inline uintptr_t calcAddS(uintptr_t ptr, std::vector<unsigned int> offsets, bool& valid)
+uintptr_t calcAddS(uintptr_t ptr, std::vector<unsigned int> offsets, bool& valid)
 {
 	uintptr_t addr = ptr;
 	for (unsigned int i = 0; i < offsets.size() - 1; ++i) {
@@ -212,6 +213,14 @@ inline uintptr_t calcAddS(uintptr_t ptr, std::vector<unsigned int> offsets, bool
 	return addr + offsets[offsets.size() - 1];
 }
 
+void patch(void* addr, std::vector<BYTE> bytes) {
+	DWORD oldProtect;
+	VirtualProtect(addr, bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtect);
+	for (int i = 0; i < bytes.size(); ++i) {
+		*((BYTE*)addr + i) = bytes[i];
+	}
+	VirtualProtect(addr, bytes.size(), oldProtect, &oldProtect);
+}
 
 typedef void (__fastcall* SET_TRANSFORM)(sow::EntityTransform*, sow::Vec3f*);
 
@@ -259,11 +268,17 @@ DWORD WINAPI MainThread(LPVOID param) {
 
 	uintptr_t game_client_address = sigscan("48 8B 0D ? ? ? ? E8 ? ? ? ? C7 47");
 
+	uintptr_t camera_clipping_func = sigscan(R"(48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 48 89 78 20 41 56 
+												   48 83 EC 30 80 3D ? ? ? ? ? 41 8A E9 49 8B F8 4C 8B F2 48 8B 
+												   D9 0F 84 ? ? ? ?")");
+
+	if (camera_clipping_func != NULL) {
+		patch((void*)camera_clipping_func, { 0xC3, 0x90, 0x90 });
+	}
 
 	sow::EntityTransform* player_head_transform = nullptr, *player_transform = nullptr;
 	float* fov = nullptr;
 	bool valid;
-	float rot = 0; 
 	for (;;) {
 		if (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) {
 			enabled = !enabled;
@@ -310,21 +325,23 @@ DWORD WINAPI MainThread(LPVOID param) {
 			// head rotation is not correctly set... this is probably not the actual "head" but rather a pivot inside of the player...
 			sow::Vec3f direction = player_transform->rotation.rotateVector(forward);
 
-			ct->position = player_head_transform->position + (direction * 20.f);
-			ct->position.y += 10.f;
-			
-			
-			while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 > 65) {
-				player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, -0.001);
-			}
-			while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 < -65) {
-				player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, 0.001);
+			ct->position = player_head_transform->position + (direction * 3.f);
+			ct->position.y += 3.f;
+
+
+			if (!input('W') && !input('A') && !input('S') && !input('D')) {
+				while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 > 65) {
+					player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, -0.001);
+				}
+				while (player_transform->rotation.signedAngleOnAxis(ct->rotation, 0.f, 1.f, 0.f) * 180 / 3.14159 < -65) {
+					player_transform->rotation = player_transform->rotation.rotate(0.f, 1.f, 0.f, 0.001);
+				}
 			}
 
 		}
 		
 		if (fov != nullptr) {
-			*fov = 1.8f;
+			*fov = 2.5f;
 		}
 	}
 
