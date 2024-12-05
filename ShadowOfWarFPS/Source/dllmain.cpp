@@ -241,11 +241,10 @@ std::vector<unsigned int> FOV_OFFSETS = { 0x30, 0x20, 0x18, 0x50, 0x10, 0x8, 0x1
 extern "C" void StoreAllRegisters();
 extern "C" void RestoreAllRegisters();
 
-bool enabled = true;
 
 void __fastcall set_transform_detour(sow::EntityTransform* transform, sow::Vec3f* new_position) {
 	StoreAllRegisters();
-	if (transform == game_client->camera_owner->gameplay_camera->transform && enabled)
+	if (transform == game_client->camera_owner->gameplay_camera->transform)
 		return;
 	RestoreAllRegisters();
 	function(transform, new_position);
@@ -254,13 +253,13 @@ void __fastcall set_transform_detour(sow::EntityTransform* transform, sow::Vec3f
 
 DWORD WINAPI MainThread(LPVOID param) {
 
-	AllocConsole();
-	(void)freopen("CONOUT$", "w", stdout);
+	//AllocConsole();
+	//(void)freopen("CONOUT$", "w", stdout);
 
 	MH_Initialize();
 
 	if (MH_CreateHook((void**)dFunction, &set_transform_detour, (void**)&function) != MH_OK) {
-		MessageBoxA(NULL, "Error", "Error", MB_ICONERROR);
+		MessageBoxA(NULL, "Unable to hook the camera!", "Error", MB_ICONERROR);
 	}
 
 	MH_EnableHook(MH_ALL_HOOKS);
@@ -280,12 +279,6 @@ DWORD WINAPI MainThread(LPVOID param) {
 	float* fov = nullptr;
 	bool valid;
 	for (;;) {
-		if (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) {
-			enabled = !enabled;
-			Sleep(500);
-		}
-		if (!enabled)
-			continue;
 		valid = false;
 		if (isBadReadPtr((void*)(game_client_address + 3)))
 			continue;
