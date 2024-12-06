@@ -229,13 +229,15 @@ SET_TRANSFORM dFunction = (SET_TRANSFORM)0x14014554C;
 
 sow::GameClient* game_client = nullptr;
 
-uintptr_t PLAYER_BASE_ADDRESS = (uintptr_t)GetModuleHandle(NULL) + 0x26FFB70;
+uintptr_t BASE = (uintptr_t)GetModuleHandle(NULL);
+
+uintptr_t PLAYER_BASE_ADDRESS = BASE + 0x26FFB70;
 std::vector<unsigned int> PLAYER_OFFSETS = { 0x28, 0x468, 0x20, 0x8, 0x38, 0x90, 0x0 };
 
-uintptr_t PLAYER_HEAD_BASE_ADDRESS = (uintptr_t)GetModuleHandle(NULL) + 0x02797808;
+uintptr_t PLAYER_HEAD_BASE_ADDRESS = BASE + 0x02797808;
 std::vector<unsigned int> PLAYER_HEAD_OFFSETS = { 0x20, 0x8, 0x28, 0xA0, 0xA0, 0x80, 0x110, 0xF8, 0x44 + 0xc0};
 
-uintptr_t FOV_BASE_ADDRESS = (uintptr_t)GetModuleHandle(NULL) + 0x02671CC8;
+uintptr_t FOV_BASE_ADDRESS = BASE + 0x02671CC8;
 std::vector<unsigned int> FOV_OFFSETS = { 0x30, 0x20, 0x18, 0x50, 0x10, 0x8, 0x1E4 };
 
 extern "C" void StoreAllRegisters();
@@ -337,11 +339,11 @@ DWORD WINAPI MainThread(LPVOID param) {
 
 		// Below actual fps mod, so if it doesnt work for some reason the fps still operates well
 
-		if (isBadReadPtr((void*)(0x142A34C68)))
+		if (isBadReadPtr((void*)(BASE + 0x2A34C68)))
 			continue;
-		if (isBadReadPtr((void*)*(uintptr_t*)(0x142A34C68)))
+		if (isBadReadPtr((void*)*(uintptr_t*)(BASE+ 0x2A34C68)))
 			continue;
-		uintptr_t fov_calc = **(uintptr_t**)(0x142A34C68);
+		uintptr_t fov_calc = **(uintptr_t**)(BASE + 0x2A34C68);
 		if (isBadReadPtr((void*)(fov_calc + 0x2f90)))
 			continue;
 		fov_calc = *(uintptr_t*)(fov_calc + 0x2f90);
