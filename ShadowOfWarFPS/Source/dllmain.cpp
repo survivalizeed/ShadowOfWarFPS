@@ -253,8 +253,8 @@ void __fastcall set_transform_detour(sow::EntityTransform* transform, sow::Vec3f
 
 DWORD WINAPI MainThread(LPVOID param) {
 
-	//AllocConsole();
-	//(void)freopen("CONOUT$", "w", stdout);
+	AllocConsole();
+	(void)freopen("CONOUT$", "w", stdout);
 
 	MH_Initialize();
 
@@ -296,6 +296,7 @@ DWORD WINAPI MainThread(LPVOID param) {
 		if (isBadReadPtr(game_client->camera_owner->gameplay_camera->transform))
 			continue;
 
+
 		if (!isBadReadPtr((void*)PLAYER_HEAD_BASE_ADDRESS)) {
 			player_head_transform = (sow::EntityTransform*)calcAddS(*(uintptr_t*)(PLAYER_HEAD_BASE_ADDRESS), PLAYER_HEAD_OFFSETS, valid);
 		}
@@ -306,10 +307,11 @@ DWORD WINAPI MainThread(LPVOID param) {
 		}
 		if (!valid) player_transform = nullptr;
 
-		if (!isBadReadPtr((void*)FOV_BASE_ADDRESS)) {
-			fov = (float*)calcAddS(*(uintptr_t*)(FOV_BASE_ADDRESS), FOV_OFFSETS, valid);
-		}
-		if (!valid) fov = nullptr;
+		//if (!isBadReadPtr((void*)FOV_BASE_ADDRESS)) {
+		//	fov = (float*)calcAddS(*(uintptr_t*)(FOV_BASE_ADDRESS), FOV_OFFSETS, valid);
+		//}
+		//if (!valid) fov = nullptr;
+
 
 		if (player_head_transform != nullptr && player_transform != nullptr) {
 			auto* ct = game_client->camera_owner->gameplay_camera->transform;
@@ -332,10 +334,28 @@ DWORD WINAPI MainThread(LPVOID param) {
 			}
 
 		}
+
+		// Below actual fps mod, so if it doesnt work for some reason the fps still operates well
+
+		if (isBadReadPtr((void*)(0x142A34C68)))
+			continue;
+		if (isBadReadPtr((void*)*(uintptr_t*)(0x142A34C68)))
+			continue;
+		uintptr_t fov_calc = **(uintptr_t**)(0x142A34C68);
+		if (isBadReadPtr((void*)(fov_calc + 0x2f90)))
+			continue;
+		fov_calc = *(uintptr_t*)(fov_calc + 0x2f90);
+		if (isBadReadPtr((void*)(fov_calc + 0x274)))
+			continue;
+		fov = (float*)(fov_calc + 0x274);
 		
-		if (fov != nullptr) {
-			*fov = 2.5f;
+		if (input(VK_NUMPAD0)) {
+			std::cout << fov << "\n";
+			Sleep(100);
 		}
+
+		*fov = 2.5f;
+
 	}
 
 	MH_DisableHook(MH_ALL_HOOKS);
